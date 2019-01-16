@@ -59,10 +59,10 @@ Building
 --------
 
 Required libraries:
-- SDL (from http://www.libsdl.org/ or e.g. the libsdl1.2 Debian package)
+- SDL (from http://www.libsdl.org/ or e.g. the libsdl2-2.0 Debian package)
 
 Required header files:
-- SDL (from http://www.libsdl.org/ or e.g. the libsdl1.2-dev Debian package)
+- SDL (from http://www.libsdl.org/ or e.g. the libsdl2-dev Debian package)
 - uvcvideo (Linux UVC driver)
 - uvcdynctrl (part of libwebcam)
 
