@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <float.h>
+#include <SDL_timer.h>
 
 #include "v4l2uvc.h"
 #include "utils.h"
@@ -330,16 +331,17 @@ int load_controls(int vd) //struct vdIn *vd)
   else {
     printf("loading controls from luvcview.cfg\n");
     char buffer[512]; 
-    fgets(buffer, sizeof(buffer), configfile);
-    while (NULL !=fgets(buffer, sizeof(buffer), configfile) )
-      {
-        sscanf(buffer, "%i%i", &control.id, &control.value);
-        if (ioctl(vd, VIDIOC_S_CTRL, &control))
-          printf("ERROR id:%d val:%d\n", control.id, control.value);
-        else
-          printf("OK    id:%d val:%d\n", control.id, control.value);
-        SDL_Delay(20);
-      }   
+    if (fgets(buffer, sizeof(buffer), configfile) != NULL) {
+        while (NULL !=fgets(buffer, sizeof(buffer), configfile) )
+        {
+            sscanf(buffer, "%i%i", &control.id, &control.value);
+            if (ioctl(vd, VIDIOC_S_CTRL, &control))
+                printf("ERROR id:%d val:%d\n", control.id, control.value);
+            else
+                printf("OK    id:%d val:%d\n", control.id, control.value);
+            SDL_Delay(20);
+        }
+    }
     fclose(configfile);
   }
 }

@@ -29,11 +29,8 @@
 #include <sys/file.h>
 #include <string.h>
 #include <pthread.h>
-#include <SDL/SDL.h>
-#include <SDL/SDL_thread.h>
-#include <SDL/SDL_audio.h>
-#include <SDL/SDL_timer.h>
-#include <linux/videodev.h>
+#include <SDL.h>
+#include <linux/videodev2.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <errno.h>
@@ -42,7 +39,6 @@
 #include <sys/time.h>
 #include <signal.h>
 #include <X11/Xlib.h>
-#include <SDL/SDL_syswm.h>
 #include "v4l2uvc.h"
 #include "gui.h"
 #include "utils.h"
@@ -106,7 +102,7 @@ typedef struct act_title {
 } act_title;
 
 typedef struct key_action_t {
-    SDLKey key;
+    SDL_Keycode key;
     action_gui action;
 } key_action_t;
 
@@ -183,12 +179,12 @@ struct vdIn *videoIn;
 
 /* Translates screen coordinates into buttons */
 action_gui
-GUI_whichbutton(int x, int y, SDL_Surface * pscreen, struct vdIn *videoIn);
+GUI_whichbutton(int x, int y, SDL_Window* pscreen, struct vdIn *videoIn);
 
-action_gui GUI_keytoaction(SDLKey key);
+action_gui GUI_keytoaction(SDL_Keycode key);
 
 struct pt_data {
-    SDL_Surface **ptscreen;
+    SDL_Window **ptscreen;
     SDL_Event *ptsdlevent;
     SDL_Rect *drect;
     struct vdIn *ptvideoIn;
@@ -197,22 +193,22 @@ struct pt_data {
 } ptdata;
 
 static int eventThread(void *data);
-static Uint32 SDL_VIDEO_Flags =
-    SDL_ANYFORMAT | SDL_DOUBLEBUF | SDL_RESIZABLE;
+static Uint32 SDL_VIDEO_Flags = SDL_WINDOW_RESIZABLE;
     
 
 int main(int argc, char *argv[])
 {
-	const SDL_VideoInfo *info;
 	char driver[128];
-	SDL_Surface *pscreen;
-	SDL_Overlay *overlay;
+        SDL_Window *sdlWindow;
+        SDL_Renderer *sdlRenderer;
+        SDL_Texture *sdlTexture;
 	SDL_Rect drect;
 	SDL_Event sdlevent;
 	SDL_Thread *mythread;
 	SDL_mutex *affmutex;
 
 	int status;
+        int pitch;
 	Uint32 currtime;
 	Uint32 lasttime;
 	unsigned char *p = NULL;
@@ -364,55 +360,23 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	/* For this version, we'll be save and disable hardware acceleration */
-	if(hwaccel)
-		if ( ! getenv("SDL_VIDEO_YUV_HWACCEL") ) {
-			putenv("SDL_VIDEO_YUV_HWACCEL=0");
-		}
-
 	printf("SDL information:\n");
-	if (SDL_VideoDriverName(driver, sizeof(driver))) {
-		printf("  Video driver: %s\n", driver);
-	}
-	info = SDL_GetVideoInfo();
+        const char * Hints[] = {
+            SDL_HINT_FRAMEBUFFER_ACCELERATION,
+            SDL_HINT_RENDER_DRIVER,
+            SDL_HINT_RENDER_OPENGL_SHADERS,
+            SDL_HINT_RENDER_LOGICAL_SIZE_MODE,
+            SDL_HINT_RENDER_SCALE_QUALITY,
+            SDL_HINT_RENDER_VSYNC,
+            SDL_HINT_VIDEO_HIGHDPI_DISABLED,
+            SDL_HINT_VIDEO_WIN_D3DCOMPILER,
+            SDL_HINT_VIDEO_WINDOW_SHARE_PIXEL_FORMAT,
+            SDL_HINT_VIDEO_DOUBLE_BUFFER,
+        };
 
-	if (info->wm_available) {
-		printf("  A window manager is available\n");
-	}
-	if (info->hw_available) {
-		printf("  Hardware surfaces are available (%dk video memory)\n",
-				info->video_mem);
-		SDL_VIDEO_Flags |= SDL_HWSURFACE;
-	}
-	if (info->blit_hw) {
-		printf("  Copy blits between hardware surfaces are accelerated\n");
-		SDL_VIDEO_Flags |= SDL_ASYNCBLIT;
-	}
-	if (info->blit_hw_CC) {
-		printf
-			("  Colorkey blits between hardware surfaces are accelerated\n");
-	}
-	if (info->blit_hw_A) {
-		printf("  Alpha blits between hardware surfaces are accelerated\n");
-	}
-	if (info->blit_sw) {
-		printf
-			("  Copy blits from software surfaces to hardware surfaces are accelerated\n");
-	}
-	if (info->blit_sw_CC) {
-		printf
-			("  Colorkey blits from software surfaces to hardware surfaces are accelerated\n");
-	}
-	if (info->blit_sw_A) {
-		printf
-			("  Alpha blits from software surfaces to hardware surfaces are accelerated\n");
-	}
-	if (info->blit_fill) {
-		printf("  Color fills on hardware surfaces are accelerated\n");
-	}
-
-	if (!(SDL_VIDEO_Flags & SDL_HWSURFACE))
-		SDL_VIDEO_Flags |= SDL_SWSURFACE;
+        for (int i=0; i < sizeof(Hints)/sizeof(char*); i++) {
+            printf("    %s: %s\n", Hints[i], SDL_GetHint(Hints[i]));
+        }
 
 	if (videodevice == NULL || *videodevice == 0) {
 		videodevice = "/dev/video0";
@@ -442,18 +406,23 @@ int main(int argc, char *argv[])
 	if ( readconfigfile )
 		load_controls(videoIn->fd);
 
-	pscreen =
-		SDL_SetVideoMode(videoIn->width, videoIn->height + 32, 0,
-				SDL_VIDEO_Flags);
+        SDL_CreateWindowAndRenderer(videoIn->width, videoIn->height + 32, SDL_VIDEO_Flags,
+                &sdlWindow, &sdlRenderer);
+        if (sdlWindow == NULL || sdlRenderer == NULL) {
+            perror("Unable create sdl window and renderer");
+            exit(1);
+        }
 
-	overlay =
-		SDL_CreateYUVOverlay(videoIn->width, videoIn->height + 32,
-				SDL_YUY2_OVERLAY, pscreen);
-	p = (unsigned char *) overlay->pixels[0];
+        sdlTexture = SDL_CreateTexture(sdlRenderer, SDL_PIXELFORMAT_YUY2,
+                SDL_TEXTUREACCESS_STREAMING, videoIn->width, videoIn->height + 32);
+        if (sdlTexture == NULL) {
+            perror("Create sdlTexuture failed");
+            exit(1);
+        }
+
 	drect.x = 0;
 	drect.y = 0;
-	drect.w = pscreen->w;
-	drect.h = pscreen->h;
+        SDL_GetWindowSize(sdlWindow, &drect.w, &drect.h);
 	if (enableRawStreamCapture) {
 		videoIn->captureFile = fopen("stream.raw", "wb");
 		if(videoIn->captureFile == NULL) {
@@ -465,21 +434,21 @@ int main(int argc, char *argv[])
 	if (enableRawFrameCapture)
 		videoIn->rawFrameCapture = enableRawFrameCapture;
 	initLut();
-	SDL_WM_SetCaption(title_act[A_VIDEO].title, NULL);
+	SDL_SetWindowTitle(sdlWindow, title_act[A_VIDEO].title);
 	lasttime = SDL_GetTicks();
 	creatButt(videoIn->width, 32);
-	SDL_LockYUVOverlay(overlay);
+        SDL_LockTexture(sdlTexture, NULL, (void**)&p, &pitch);
 	memcpy(p + (videoIn->width * (videoIn->height) * 2), YUYVbutt,
 			videoIn->width * 64);
-	SDL_UnlockYUVOverlay(overlay);
+        SDL_UnlockTexture(sdlTexture);
 	/* initialize thread data */
-	ptdata.ptscreen = &pscreen;
+	ptdata.ptscreen = &sdlWindow;
 	ptdata.ptvideoIn = videoIn;
 	ptdata.ptsdlevent = &sdlevent;
 	ptdata.drect = &drect;
 	affmutex = SDL_CreateMutex();
 	ptdata.affmutex = affmutex;
-	mythread = SDL_CreateThread(eventThread, (void *) &ptdata);
+	mythread = SDL_CreateThread(eventThread, "SDL_EventThread", (void *) &ptdata);
 
 	// Initialize frame rate calculator
 	int loop_counter = 0;
@@ -507,11 +476,13 @@ int main(int argc, char *argv[])
 		if (videoIn->toggleAvi)
 			printf("\rframe rate: %g     ", frmrate);
 
-		SDL_LockYUVOverlay(overlay);
+                SDL_LockTexture(sdlTexture, NULL, (void**)&p, &pitch);
 		memcpy(p, videoIn->framebuffer,
 				videoIn->width * (videoIn->height) * 2);
-		SDL_UnlockYUVOverlay(overlay);
-		SDL_DisplayYUVOverlay(overlay, &drect);
+                SDL_UnlockTexture(sdlTexture);
+                SDL_RenderClear(sdlRenderer);
+                SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL);
+                SDL_RenderPresent(sdlRenderer);
 
 		if (videoIn->getPict) { 
 			switch(videoIn->formatIn){
@@ -530,13 +501,16 @@ int main(int argc, char *argv[])
 
 		SDL_LockMutex(affmutex);
 		ptdata.frmrate = frmrate;
-		SDL_WM_SetCaption(videoIn->status, NULL);
+                SDL_SetWindowTitle(sdlWindow, videoIn->status);
 		SDL_UnlockMutex(affmutex);
 		SDL_Delay(10);
 
 	}
 	SDL_WaitThread(mythread, &status);
 	SDL_DestroyMutex(affmutex);
+        SDL_DestroyTexture(sdlTexture);
+        SDL_DestroyRenderer(sdlRenderer);
+        SDL_DestroyWindow(sdlWindow);
 
 	/* if avifile is defined, we made a video: compute the exact fps and
 	   set it in the video */
@@ -557,23 +531,26 @@ int main(int argc, char *argv[])
 }
 
 action_gui
-GUI_whichbutton(int x, int y, SDL_Surface * pscreen, struct vdIn *videoIn)
+GUI_whichbutton(int x, int y, SDL_Window * pscreen, struct vdIn *videoIn)
 {
     int nbutton, retval;
-    FIXED scaleh = TO_FIXED(pscreen->h) / (videoIn->height + 32);
+    int w, h;
+    SDL_GetWindowSize(pscreen, &w, &h);
+
+    FIXED scaleh = TO_FIXED(h) / (videoIn->height + 32);
     int nheight = FROM_FIXED(scaleh * videoIn->height);
     if (y < nheight)
 	return (A_VIDEO);
     nbutton = FROM_FIXED(scaleh * 32);
     /* 8 buttons across the screen, corresponding to 0-7 extand to 16*/
-    retval = (x * 16) / (pscreen->w);
+    retval = (x * 16) / (w);
     /* Bottom half of the button denoted by flag|0x10 */
     if (y > (nheight + (nbutton / 2)))
 	retval |= 0x10;
     return ((action_gui) retval);
 }
 
-action_gui GUI_keytoaction(SDLKey key)
+action_gui GUI_keytoaction(SDL_Keycode key)
 {
 	int i = 0;
 	while(keyaction[i].key){
@@ -589,7 +566,7 @@ static int eventThread(void *data)
 {
 	struct pt_data *gdata = (struct pt_data *) data;
 	struct v4l2_control control;
-	SDL_Surface *pscreen = *gdata->ptscreen;
+	SDL_Window *pscreen = *gdata->ptscreen;
 	struct vdIn *videoIn = gdata->ptvideoIn;
 	SDL_Event *sdlevent = gdata->ptsdlevent;
 	SDL_Rect *drect = gdata->drect;
@@ -617,14 +594,6 @@ static int eventThread(void *data)
 				case SDL_MOUSEMOTION:
 					SDL_GetMouseState(&x, &y);
 					curr_action = GUI_whichbutton(x, y, pscreen, videoIn);
-					break;
-				case SDL_VIDEORESIZE:
-					pscreen =
-						SDL_SetVideoMode(sdlevent->resize.w,
-								sdlevent->resize.h, 0,
-								SDL_VIDEO_Flags);
-					drect->w = sdlevent->resize.w;
-					drect->h = sdlevent->resize.h;
 					break;
 				case SDL_KEYDOWN:
 					curr_action = GUI_keytoaction(sdlevent->key.keysym.sym);

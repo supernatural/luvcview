@@ -29,7 +29,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
-#include <linux/videodev.h>
+#include <linux/videodev2.h>
 #include "avilib.h"
 
 #include "uvcvideo.h"
@@ -83,6 +83,7 @@ struct vdIn {
 int
 init_videoIn(struct vdIn *vd, char *device, int width, int height, float fps,
 	     int format, int grabmethod, char *avifilename);
+int check_videoIn(struct vdIn *vd, char *device);
 int enum_controls(int vd);
 int save_controls(int vd);
 int load_controls(int vd);
@@ -97,6 +98,8 @@ int v4l2DownControl(struct vdIn *vd, int control);
 int v4l2ToggleControl(struct vdIn *vd, int control);
 int v4l2ResetControl(struct vdIn *vd, int control);
 int v4l2ResetPanTilt(struct vdIn *vd);
+int v4l2ResetPan(struct vdIn *vd);
+int v4l2ResetTilt(struct vdIn *vd);
 int v4L2UpDownPan(struct vdIn *vd, short inc);
 int v4L2UpDownTilt(struct vdIn *vd,short inc);
 int v4L2UpDownPanTilt(struct vdIn *vd, short inc_p, short inc_t);

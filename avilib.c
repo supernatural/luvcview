@@ -908,7 +908,7 @@ static int avi_write_data(avi_t *AVI, char *data, unsigned long length, int audi
 {
    int n;
 
-   unsigned char astr[5];
+   unsigned char astr[16];
 
    /* Check for maximum file length */
    
